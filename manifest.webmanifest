@@ -1,0 +1,14 @@
+{
+  "name": "Kartoteka - angielski A1-A2",
+  "short_name": "Kartoteka",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F3EEE3",
+  "theme_color": "#F3EEE3",
+  "lang": "pl",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
