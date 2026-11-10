@@ -409,6 +409,50 @@ pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.5 ui-monospace
 .set input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--margin); }
 .set input[type="range"] { accent-color: var(--margin); }
 
+/* ---------- 1000 słów ---------- */
+:root { --ten: #E4572E 0 10%, #D99A1C 10% 20%, #5E9C5B 20% 30%, #2E86AB 30% 40%, #A23B72 40% 50%, #3D5A80 50% 60%, #D96C4F 60% 70%, #3F9C83 70% 80%, #B9852A 80% 90%, #5E548E 90% 100%; }
+.t1000::before { background: linear-gradient(90deg, var(--ten)); }
+.t1000 .ring-fg { stroke: var(--margin); }
+.tmore { display: block; margin: 10px auto 0; }
+.per { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 2px dashed var(--rule); }
+.per > span { flex-basis: 100%; text-align: center; font-size: 13px; color: var(--ink-2); font-weight: 600; margin-bottom: 2px; }
+.per .seg { min-width: 44px; min-height: 36px; }
+.credit { font-size: 12px; color: var(--muted); margin: 26px 2px 0; }
+
+.tban { position: relative; overflow: hidden; width: 100%; margin-top: 16px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; text-align: left; padding: 14px 16px 14px 20px; background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; box-shadow: 3px 3px 0 var(--sh); transition: transform 0.08s, box-shadow 0.08s; }
+.tban::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 7px; background: linear-gradient(180deg, var(--ten)); }
+.tban:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--sh); }
+.tban-n { font: 800 26px/1 var(--display); }
+.tban-n small { display: inline; font: 700 13px var(--font); color: var(--muted); }
+.tban-t b { display: block; font-size: 17px; }
+.tban-t small { font-size: 13px; }
+.tban-go { font: 800 30px/1 var(--display); color: var(--margin); }
+
+.trank { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 12px; border: 2px solid var(--ink); background: var(--wk); color: #fff; font: 800 18px/1 var(--display); }
+.trank small { color: inherit; opacity: 0.85; font: 700 9px/1 var(--font); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 2px; }
+.trank.big { width: 66px; height: 66px; font-size: 23px; }
+.tcard > section:last-child { padding-bottom: 18px; }
+
+.hund { margin-bottom: 10px; }
+.hund-tab { width: 100%; display: grid; grid-template-columns: 40px 1fr; gap: 8px 12px; align-items: center; text-align: left; padding: 12px 14px 14px 12px; background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; box-shadow: 3px 3px 0 var(--sh); }
+.hund.open .hund-tab { border-radius: 14px 14px 0 0; box-shadow: none; }
+.hund-t b { display: block; font-size: 16px; line-height: 1.25; }
+.hund-t small { font-size: 13px; }
+.cells { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(25, 1fr); gap: 2px; }
+.cells i { height: 10px; border-radius: 2px; background: var(--rule); }
+.cells .c1 { background: color-mix(in srgb, var(--wk) 28%, var(--paper)); }
+.cells .c2 { background: color-mix(in srgb, var(--wk) 42%, var(--paper)); }
+.cells .c3 { background: color-mix(in srgb, var(--wk) 56%, var(--paper)); }
+.cells .c4 { background: color-mix(in srgb, var(--wk) 70%, var(--paper)); }
+.cells .c5 { background: color-mix(in srgb, var(--wk) 84%, var(--paper)); }
+.cells .c6 { background: var(--wk); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.hund-body { padding: 12px; background: var(--paper-2); border: 2px solid var(--ink); border-top: 0; border-radius: 0 0 14px 14px; box-shadow: 3px 3px 0 var(--sh); }
+.mini-n { flex: none; min-width: 26px; font: 800 13px var(--display); color: var(--muted); }
+.hund-body .minis, .deck .minis.tl { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.hund-body .mini, .minis.tl .mini { padding: 9px 28px 9px 12px; gap: 6px; }
+.hund-body .mini-t b, .minis.tl .mini-t b { font-size: 15px; }
+.hund-body .mini-b, .minis.tl .mini-b { width: 20px; height: 20px; font-size: 11px; top: 5px; right: 5px; }
+
 @media (max-width: 480px) {
   .l-foot.fb .btn { width: 100%; }
   .fam { grid-template-columns: 1fr; }
@@ -416,6 +460,7 @@ pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.5 ui-monospace
 @media (min-width: 700px) {
   .page { padding-top: 24px; }
   .boxes { grid-template-columns: repeat(6, 1fr); }
+  .cells { grid-template-columns: repeat(50, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

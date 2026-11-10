@@ -4,10 +4,12 @@ Statyczna aplikacja webowa w stylu Duolingo z rozbudowanymi fiszkami. Hosting: G
 
 ## Pliki
 - `index.html` - szkielet, ładuje `data/week-01.js` ... `week-12.js` i `app.js`. Po zmianie `app.js` lub `style.css` podbij `?v=N` w index.html (cache GitHub Pages i przeglądarki).
-- `app.js` - cały silnik: widoki (Dziś, Fiszki, Postęp), lekcje, system pudełek, raporty.
+- `app.js` - cały silnik: widoki (Dziś, 1000 słów, Fiszki, Postęp), lekcje, system pudełek, raporty.
 - `style.css` - wygląd (papier, tusz, kartoteka), tryb ciemny przez `prefers-color-scheme`.
 - `data/week-NN.js` - treść tygodnia. Schemat i STAŁA lista słów: `data/_schemat.md`.
 - `tools/validate.js` - walidator treści: `node tools/validate.js` (wszystkie) albo `node tools/validate.js 3` (jeden tydzień). Musi zwrócić OK.
+- Moduł "1000 słów" (zakładka 1000 słów): `data/top-01.js` ... `top-10.js` (po 100 fiszek, `window.TOP`), schemat `data/_top1000.md`, lista i kolejność `tools/ngsl-1000.tsv` (NGSL, CC BY-SA 4.0, nie zmieniać), walidator `node tools/validate-top.js`. Po zmianie pliku top-NN podbij jego `?v=N` w index.html.
+- Zasady modułu 1000: dziennie 5/10/15/20 nowych (domyślnie 10), "Już znam" = pudełko 4, "Uczę się" = pudełko 1 + sprawdzenie (co 5 słów EN -> PL, na koniec PL -> EN), powtórki to fiszki do odwrócenia z samooceną, max 40 w sesji. Przerwanie sesji zapisuje to, co zrobione. Stan: `S.top` (`words`, `newDay`, `per`), id fiszki = `t` + numer.
 - `nauczyciel/` - stara wersja: nauczyciel prowadzący lekcje w czacie Claude Code. Lokalnie, poza repo.
 
 ## Zasady nauki (z briefu ucznia)

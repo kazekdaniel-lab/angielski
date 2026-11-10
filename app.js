@@ -41,6 +41,14 @@
   const color = (n) => COLORS[(n - 1) % COLORS.length];
   const prog = (n) => PROGRAM[n - 1] || [n, "", ""];
 
+  // moduł 1000 słów (lista NGSL): data/top-NN.js (window.TOP), id fiszki = "t" + numer
+  const TOP = (window.TOP || []).filter((x) => x && x.n).sort((a, b) => a.n - b.n);
+  const TW = {};
+  TOP.forEach((x) => { x.id = "t" + x.n; TW[x.id] = x; });
+  const tcolor = (n) => COLORS[(Math.ceil(n / 100) - 1) % COLORS.length];
+  const TREV_MAX = 40; // max powtórek w jednej sesji 1000 słów
+  const PER_OPTS = [5, 10, 15, 20];
+
   // ---------- narzędzia ----------
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -66,16 +74,21 @@
     chart: '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="5.5" y="12" width="3" height="6" rx="1" fill="currentColor"/><rect x="10.5" y="8" width="3" height="10" rx="1" fill="currentColor"/><rect x="15.5" y="4" width="3" height="14" rx="1" fill="currentColor"/></svg>',
     lock: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2" fill="currentColor"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
     check: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    grid: '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><g fill="currentColor"><rect x="3" y="3" width="5" height="5" rx="1.2"/><rect x="9.5" y="3" width="5" height="5" rx="1.2"/><rect x="16" y="3" width="5" height="5" rx="1.2"/><rect x="3" y="9.5" width="5" height="5" rx="1.2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1.2"/></g><g fill="none" stroke="currentColor" stroke-width="1.6"><rect x="16.8" y="10.3" width="3.4" height="3.4" rx="1"/><rect x="3.8" y="16.8" width="3.4" height="3.4" rx="1"/><rect x="10.3" y="16.8" width="3.4" height="3.4" rx="1"/><rect x="16.8" y="16.8" width="3.4" height="3.4" rx="1"/></g></svg>',
   };
 
   // ---------- stan ----------
   const KEY = "kartoteka.v1";
-  const fresh = () => ({ v: 1, pos: { week: 1, day: 1 }, done: {}, tests: {}, words: {}, xp: 0, xpDay: {}, streak: 0, lastDay: null, lastMain: null, session: 0, log: [], settings: { sound: true, rate: 0.9, voice: "" } });
+  const fresh = () => ({ v: 1, pos: { week: 1, day: 1 }, done: {}, tests: {}, words: {}, xp: 0, xpDay: {}, streak: 0, lastDay: null, lastMain: null, session: 0, log: [], settings: { sound: true, rate: 0.9, voice: "" }, top: { words: {}, newDay: {}, per: 10 } });
   let S = load();
+  function hydrate(o) { // stan z pliku lub localStorage + brakujące pola z nowszych wersji
+    const f = fresh();
+    return Object.assign(f, o, { settings: Object.assign(f.settings, o.settings || {}), top: Object.assign(f.top, o.top || {}) });
+  }
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { const o = JSON.parse(raw); const f = fresh(); return Object.assign(f, o, { settings: Object.assign(f.settings, o.settings || {}) }); }
+      if (raw) return hydrate(JSON.parse(raw));
     } catch (e) { /* brak dostępu do localStorage */ }
     return fresh();
   }
@@ -101,6 +114,22 @@
   }
   function boxLabel(id) {
     const w = S.words[id];
+    if (!w) return "jeszcze nie poznane";
+    if (w.box >= 6) return "opanowane";
+    const d = daysBetween(today(), w.due);
+    const when = d <= 0 ? "powtórka dziś" : d === 1 ? "powtórka jutro" : `powtórka za ${d} dni`;
+    return `pudełko ${w.box} · ${when}`;
+  }
+  function tDue() {
+    const t = today();
+    return Object.entries(S.top.words)
+      .filter(([id, w]) => TW[id] && w.box < 6 && w.due && w.due <= t)
+      .sort((a, b) => a[1].box - b[1].box || (a[1].due < b[1].due ? -1 : a[1].due > b[1].due ? 1 : 0))
+      .map(([id]) => TW[id]);
+  }
+  const tNewToday = () => S.top.newDay[today()] || 0;
+  function tBoxLabel(id) {
+    const w = S.top.words[id];
     if (!w) return "jeszcze nie poznane";
     if (w.box >= 6) return "opanowane";
     const d = daysBetween(today(), w.due);
@@ -219,7 +248,7 @@
   // ---------- UI: wspólne ----------
   const app = document.getElementById("app");
   const modal = document.getElementById("modal");
-  const UI = { view: "home", open: null, filter: null, q: "", flipDir: "en" };
+  const UI = { view: "home", open: null, filter: null, q: "", flipDir: "en", hund: 0, tq: "" };
   let L = null; // bieżąca lekcja
   let F = null; // tryb fiszek
 
@@ -281,26 +310,66 @@
     say(w.en);
   }
 
+  // fiszka z modułu 1000 słów
+  function thl(sentence, w) { // podświetla słowo, jego końcówki (-s, -ed, -ing...) albo formy nieregularne z pola forms
+    const s = esc(sentence);
+    const e = w.en, b = reEsc(e);
+    const alts = [e.length > 2 ? `${b}(?:s|es|ed|d|ing|ly|er|est)?` : b];
+    if (e.length > 2 && /e$/.test(e)) alts.push(`${reEsc(e.slice(0, -1))}(?:ing|ed|er|est)`); // prepare -> preparing
+    if (/[^aeiou]y$/.test(e)) alts.push(`${reEsc(e.slice(0, -1))}i(?:es|ed|er|est|ly)`); // carry -> carries
+    if (/[^aeiou][aeiou][bdgklmnprt]$/.test(e)) alts.push(`${b}${e.slice(-1)}(?:ing|ed|er|est)`); // kid -> kidding
+    const head = alts.join("|");
+    const forms = String(w.forms || "").split(/[^A-Za-z]+/).filter((t) => t.length > 1).map(reEsc);
+    try { return s.replace(new RegExp(`(^|[^A-Za-z])(${[head].concat(forms).join("|")})(?![A-Za-z])`, "i"), "$1<mark>$2</mark>"); } catch (e) { return s; }
+  }
+  function tcardHTML(w, o = {}) {
+    const ex = w.ex.map((e) => `<li><button class="aud sm" data-say="${esc(e.en)}" aria-label="Posłuchaj zdania">${ICON.spk}</button><span><b lang="en">${thl(e.en, w)}</b><small>${esc(e.pl)}</small></span></li>`).join("");
+    const ph = w.phrases.map((p) => `<button class="chip" data-say="${esc(p.en)}"><b lang="en">${esc(p.en)}</b><small>${esc(p.pl)}</small></button>`).join("");
+    return `<article class="icard tcard" style="--wk:${tcolor(w.n)}">
+      <header class="icard-head">
+        <span class="trank" aria-label="Słowo numer ${w.n}"><small>nr</small>${w.n}</span>
+        <div class="icard-title"><h2 lang="en">${esc(w.en)}</h2><p class="say">[${esc(w.say)}]</p></div>
+        ${audioBtns(w.en, true)}
+      </header>
+      <p class="icard-pl"><span>${esc(w.pl)}</span><em>${esc(w.pos)}</em></p>
+      ${w.forms ? `<section><h3>Odmiana</h3><p class="forms" lang="en">${esc(w.forms)}</p></section>` : ""}
+      <section><h3>Przykłady</h3><ul class="exs">${ex}</ul></section>
+      <section><h3>Połączenia</h3><div class="chips">${ph}</div></section>
+      ${w.note ? `<section class="note"><h3>Uwaga</h3><p>${esc(w.note)}</p></section>` : ""}
+      ${o.noFoot ? "" : `<footer class="icard-foot"><span>1000 słów · nr ${w.n}</span><span>${tBoxLabel(w.id)}</span></footer>`}
+    </article>`;
+  }
+  function openTop(id) {
+    const w = TW[id]; if (!w) return;
+    modal.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="Fiszka ${esc(w.en)}"><button class="icon-btn sheet-x" id="mclose" aria-label="Zamknij">${ICON.x}</button>${tcardHTML(w)}</div>`;
+    modal.classList.add("open");
+    document.body.classList.add("noscroll");
+    const close = () => { modal.classList.remove("open"); modal.innerHTML = ""; document.body.classList.remove("noscroll"); };
+    $("#mclose").onclick = close;
+    modal.onclick = (e) => { if (e.target === modal) close(); };
+    say(w.en);
+  }
+
   // ---------- widoki ----------
   function render() {
     if (L || F) return;
     const v = UI.view;
-    app.innerHTML = `<div class="page">${v === "home" ? homeHTML() : v === "cards" ? cardsHTML() : progressHTML()}</div>${navHTML()}`;
-    ({ home: bindHome, cards: bindCards, progress: bindProgress })[v]();
+    app.innerHTML = `<div class="page">${v === "home" ? homeHTML() : v === "top" ? topHTML() : v === "cards" ? cardsHTML() : progressHTML()}</div>${navHTML()}`;
+    ({ home: bindHome, top: bindTop, cards: bindCards, progress: bindProgress })[v]();
     $$(".nav button").forEach((b) => (b.onclick = () => { UI.view = b.dataset.v; render(); window.scrollTo(0, 0); }));
   }
   function navHTML() {
     const it = (v, label, icon) => `<button data-v="${v}" class="${UI.view === v ? "on" : ""}" aria-current="${UI.view === v ? "page" : "false"}">${icon}<span>${label}</span></button>`;
-    return `<nav class="nav">${it("home", "Dziś", ICON.today)}${it("cards", "Fiszki", ICON.cards)}${it("progress", "Postęp", ICON.chart)}</nav>`;
+    return `<nav class="nav">${it("home", "Dziś", ICON.today)}${it("top", "1000 słów", ICON.grid)}${it("cards", "Fiszki", ICON.cards)}${it("progress", "Postęp", ICON.chart)}</nav>`;
   }
   function topbar() {
     const xp = S.xpDay[today()] || 0;
     return `<header class="top"><div class="brand"><span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>Kartoteka</div>
       <div class="chips-top"><span class="pill streak" title="Dni z rzędu">${ICON.flame}${streakNow()}</span><span class="pill xp" title="XP dzisiaj">${ICON.star}${xp} XP</span></div></header>`;
   }
-  function ring(v, max) {
+  function ring(v, max, label) {
     const p = Math.min(1, v / max), r = 22, c = 2 * Math.PI * r;
-    return `<svg class="ring" viewBox="0 0 56 56" width="56" height="56" aria-label="Cel dnia: ${v} z ${max} XP"><circle cx="28" cy="28" r="${r}" class="ring-bg"/><circle cx="28" cy="28" r="${r}" class="ring-fg" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p)}"/><text x="28" y="32" text-anchor="middle">${Math.min(v, 999)}</text></svg>`;
+    return `<svg class="ring" viewBox="0 0 56 56" width="56" height="56" aria-label="${esc(label || `Cel dnia: ${v} z ${max} XP`)}"><circle cx="28" cy="28" r="${r}" class="ring-bg"/><circle cx="28" cy="28" r="${r}" class="ring-fg" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p)}"/><text x="28" y="32" text-anchor="middle">${Math.min(v, 9999)}</text></svg>`;
   }
   function topicOf(week, day) {
     const W = byWeek(week);
@@ -363,10 +432,19 @@
       return `<div class="wk ${st}${open ? " open" : ""}" style="--wk:${color(n)}">
         <button class="wk-tab" data-open="${n}" aria-expanded="${open}"><span class="wk-num">${n}</span><span class="wk-t"><b>${esc(t)}</b><small>${esc(g)}</small></span><span class="wk-meta">${meta}</span></button>${stations}</div>`;
     }).join("");
-    return `${topbar()}${todayCard}<section class="weeks"><h2 class="sec">Kartoteka kursu</h2>${weeks}</section>`;
+    return `${topbar()}${todayCard}${topBanner()}<section class="weeks"><h2 class="sec">Kartoteka kursu</h2>${weeks}</section>`;
+  }
+  function topBanner() {
+    if (!TOP.length) return "";
+    const known = Object.keys(S.top.words).filter((id) => TW[id]).length;
+    const rev = Math.min(tDue().length, TREV_MAX), left = Math.max(0, S.top.per - tNewToday());
+    const nextW = TOP.find((w) => !S.top.words[w.id]);
+    const todo = [rev ? `${rev} ${plural(rev, "powtórka", "powtórki", "powtórek")}` : "", left && nextW ? `${left} ${plural(left, "nowe słowo", "nowe słowa", "nowych słów")}` : ""].filter(Boolean).join(" + ");
+    return `<button class="tban" id="gotop"><span class="tban-n">${known}<small>/1000</small></span><span class="tban-t"><b>1000 słów</b><small>${todo ? `Dziś: ${todo}` : "Na dziś zrobione"}</small></span><span class="tban-go" aria-hidden="true">›</span></button>`;
   }
   function bindHome() {
     const s = $("#start"); if (s) s.onclick = () => startSession("main", S.pos.week, S.pos.day);
+    const gt = $("#gotop"); if (gt) gt.onclick = () => { UI.view = "top"; render(); window.scrollTo(0, 0); };
     const r = $("#rev"); if (r) r.onclick = startReview;
     const ca = $("#copyall"); if (ca) ca.onclick = () => copy(historyText());
     $$("[data-open]").forEach((b) => (b.onclick = () => { const n = +b.dataset.open; const isOpen = b.getAttribute("aria-expanded") === "true"; UI.open = isOpen ? 0 : n; render(); }));
@@ -422,10 +500,88 @@
     $$("[data-card]").forEach((b) => (b.onclick = () => openCard(b.dataset.card)));
   }
 
+  // ---------- widok: 1000 słów ----------
+  function topHTML() {
+    if (!TOP.length) return `${topbar()}<p class="empty">Nie udało się wczytać fiszek 1000 słów (pliki data/top-NN.js).</p>`;
+    const T = S.top.words;
+    const ids = Object.keys(T).filter((id) => TW[id]);
+    const counts = [1, 2, 3, 4, 5, 6].map((b) => ids.filter((id) => Math.min(6, T[id].box) === b).length);
+    const rev = Math.min(tDue().length, TREV_MAX);
+    const done = tNewToday(), left = Math.max(0, S.top.per - done);
+    const nextW = TOP.find((w) => !T[w.id]);
+    const can = rev > 0 || (left > 0 && !!nextW);
+    const newTxt = !nextW ? "cała lista poznana" : left ? `${left}, od nr ${nextW.n}` : `dziś już ${done}`;
+    const hero = `<section class="today t1000">
+      <div class="today-top"><p class="kicker">Najczęstsze słowa · lista NGSL</p>${ring(ids.length, 1000, `Poznane: ${ids.length} z 1000 słów`)}</div>
+      <h1>1000 słów</h1>
+      <p class="lead">Od najczęstszego: najpierw the, be, and, potem coraz rzadsze. Codziennie kilka nowych i powtórki w pudełkach.</p>
+      <ol class="plan">
+        <li><span class="pn">1</span><b>Powtórka</b><span>${rev ? `${rev} ${plural(rev, "fiszka", "fiszki", "fiszek")}` : "dziś nic zaległego"}</span></li>
+        <li><span class="pn">2</span><b>Nowe słowa</b><span>${newTxt}</span></li>
+      </ol>
+      <button class="btn primary big" id="tstart" ${can ? "" : "disabled"}>${can ? "Ucz się" : "Na dziś zrobione"}</button>
+      ${!left && nextW ? `<button class="link tmore" id="tmore">Chcę jeszcze ${S.top.per} nowych</button>` : ""}
+      <div class="per" role="group" aria-label="Nowych słów dziennie"><span>Nowych dziennie</span>${PER_OPTS.map((n) => `<button class="seg${S.top.per === n ? " on" : ""}" data-per="${n}" aria-pressed="${S.top.per === n}">${n}</button>`).join("")}</div>
+    </section>`;
+    const boxes = counts.map((c, i) => `<div class="bx${i === 5 ? " master" : ""}"><span class="bx-n">${c}</span><span class="bx-l">${i === 5 ? "opanowane" : "pudełko " + (i + 1)}</span><span class="bx-i">${i === 5 ? "" : i === 0 ? "co dzień" : "co " + INTERVAL[i + 1] + " dni"}</span></div>`).join("");
+    const q = UI.tq.trim().toLowerCase();
+    let list;
+    if (q) {
+      const hits = TOP.filter((w) => w.en.toLowerCase().includes(q) || w.pl.toLowerCase().includes(q)).slice(0, 60);
+      list = hits.length ? `<div class="minis tl">${hits.map(tMini).join("")}</div>` : `<p class="empty">Brak wyników.</p>`;
+    } else {
+      list = Array.from(new Set(TOP.map((w) => Math.ceil(w.n / 100)))).map(hundHTML).join("");
+    }
+    return `${topbar()}${hero}
+      <section class="boxes-wrap"><h2 class="sec">Pudełka 1000 słów</h2><div class="boxes">${boxes}</div></section>
+      <section class="deck"><h2 class="sec">Mapa listy</h2><div class="deck-tools"><input type="search" id="tq" placeholder="Szukaj w 1000 słów (EN lub PL)" value="${esc(UI.tq)}" aria-label="Szukaj słowa"></div>${list}</section>
+      <p class="credit">Lista słów i kolejność: New General Service List (NGSL), Browne, Culligan, Phillips, licencja CC BY-SA 4.0.</p>`;
+  }
+  function hundHTML(h) {
+    const T = S.top.words;
+    const ws = TOP.filter((w) => Math.ceil(w.n / 100) === h);
+    const kn = ws.filter((w) => T[w.id]).length, ms = ws.filter((w) => T[w.id] && T[w.id].box >= 6).length;
+    const open = UI.hund === h;
+    const cells = ws.map((w) => `<i class="c${T[w.id] ? Math.min(6, T[w.id].box) : 0}"></i>`).join("");
+    return `<div class="hund${open ? " open" : ""}" style="--wk:${tcolor(h * 100)}">
+      <button class="hund-tab" data-h="${h}" aria-expanded="${open}">
+        <span class="wk-num">${h}</span>
+        <span class="hund-t"><b>Słowa ${(h - 1) * 100 + 1}-${h * 100}</b><small>${kn}/${ws.length} poznanych${ms ? ` · ${ms} opanowanych` : ""}</small></span>
+        <span class="cells" aria-hidden="true">${cells}</span>
+      </button>
+      ${open ? `<div class="hund-body"><div class="minis">${ws.map(tMini).join("")}</div></div>` : ""}
+    </div>`;
+  }
+  function tMini(w) {
+    const st = S.top.words[w.id];
+    const b = st ? (st.box >= 6 ? "★" : st.box) : "";
+    return `<button class="mini${st ? "" : " unknown"}" data-top="${w.id}" style="--wk:${tcolor(w.n)}"><span class="mini-n">${w.n}</span><span class="mini-t"><b lang="en">${esc(w.en)}</b><small>${esc(w.pl)}</small></span>${b !== "" ? `<span class="mini-b" title="${tBoxLabel(w.id)}">${b}</span>` : ""}</button>`;
+  }
+  function bindTop() {
+    const s = $("#tstart"); if (s) s.onclick = () => startTop(false);
+    const m = $("#tmore"); if (m) m.onclick = () => startTop(true);
+    $$("[data-per]").forEach((b) => (b.onclick = () => { S.top.per = +b.dataset.per; save(); render(); }));
+    $$("[data-h]").forEach((b) => (b.onclick = () => {
+      const h = +b.dataset.h;
+      UI.hund = UI.hund === h ? 0 : h;
+      render();
+      const el = $(`[data-h="${h}"]`); if (UI.hund && el) el.scrollIntoView({ block: "start" });
+    }));
+    $$("[data-top]").forEach((b) => (b.onclick = () => openTop(b.dataset.top)));
+    const q = $("#tq");
+    if (q) q.oninput = (e) => {
+      UI.tq = e.target.value;
+      const pos = e.target.selectionStart;
+      render();
+      const n = $("#tq"); n.focus(); try { n.setSelectionRange(pos, pos); } catch (x) { /* ok */ }
+    };
+  }
+
   function progressHTML() {
     const known = Object.keys(S.words).filter((id) => WORD[id]);
     const mastered = known.filter((id) => S.words[id].box >= 6).length;
-    const tiles = [[S.session, "sesji"], [known.length, "poznanych słów"], [mastered, "opanowanych"], [S.xp, "XP razem"], [streakNow(), "dni z rzędu"]]
+    const topKnown = Object.keys(S.top.words).filter((id) => TW[id]).length;
+    const tiles = [[S.session, "sesji"], [known.length, "słów z kursu"], [mastered, "opanowanych z kursu"], [`${topKnown}/1000`, "z listy 1000 słów"], [S.xp, "XP razem"], [streakNow(), "dni z rzędu"]]
       .map(([v, l]) => `<div class="tile-stat"><b>${v}</b><span>${l}</span></div>`).join("");
     const tests = PROGRAM.map(([n, t]) => {
       const r = S.tests[n] || [];
@@ -469,7 +625,7 @@
           const o = JSON.parse(rd.result);
           if (!o || o.v !== 1 || !o.pos || !o.words) throw new Error("zły format");
           if (!confirm("Wczytać postęp z pliku? Obecny postęp w tej przeglądarce zostanie zastąpiony.")) return;
-          const f0 = fresh(); S = Object.assign(f0, o, { settings: Object.assign(f0.settings, o.settings || {}) }); save(); render(); toast("Postęp wczytany.");
+          S = hydrate(o); save(); render(); toast("Postęp wczytany.");
         } catch (x) { toast("To nie jest plik z postępem Kartoteki."); }
       };
       rd.readAsText(f);
@@ -603,6 +759,83 @@
     showStep();
   }
 
+  // ---------- sesja 1000 słów ----------
+  // powtórki: fiszka do odwrócenia + samoocena; nowe: karta (Już znam / Uczę się), co 5 słów sprawdzenie EN -> PL, na koniec PL -> EN
+  function tOpts(w, key) {
+    const parts = (s) => s.toLowerCase().replace(/\([^)]*\)/g, "").split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+    const mine = new Set(parts(w.pl));
+    const seen = new Set([w[key].toLowerCase()]);
+    const out = [w];
+    const add = (list) => {
+      for (const x of shuffle(list)) {
+        if (out.length >= 4) break;
+        const k = x[key].toLowerCase();
+        if (x.id === w.id || seen.has(k) || parts(x.pl).some((p) => mine.has(p))) continue; // bez dwóch poprawnych odpowiedzi
+        seen.add(k); out.push(x);
+      }
+    };
+    const near = TOP.filter((x) => Math.abs(x.n - w.n) <= 150);
+    add(near.filter((x) => x.pos === w.pos)); add(near); add(TOP);
+    return shuffle(out);
+  }
+  function tPickNext() {
+    return TOP.find((w) => !S.top.words[w.id] && !L.learn.includes(w.id) && !L.known.includes(w.id));
+  }
+  function startTop(extra) {
+    if (!TOP.length) return toast("Fiszki 1000 słów jeszcze się nie wczytały.");
+    const due = tDue().slice(0, TREV_MAX);
+    const quota = extra ? S.top.per : Math.max(0, S.top.per - tNewToday());
+    L = newL({ kind: "top", mode: "top", steps: shuffle(due).map((w) => ({ type: "tflip", wordId: w.id, scored: true })), learn: [], known: [], chunk: [], quota, shown: 0 });
+    const first = quota > 0 ? tPickNext() : null;
+    if (first) {
+      if (L.steps.length) L.steps.push({ type: "divider", title: "nowe słowa", sub: `${quota} ${plural(quota, "słowo", "słowa", "słów")} z listy, od nr ${first.n}` });
+      L.steps.push({ type: "tintro", wordId: first.id });
+    }
+    if (!L.steps.length) { L = null; return toast("Na dziś wszystko zrobione."); }
+    lessonShell();
+    showStep();
+  }
+  function finishTop() {
+    L.finished = true;
+    const t = today(), T = S.top.words;
+    const res = { nowe: [], znane: [], awanse: [], spadki: [] };
+    const doneSteps = L.steps.slice(0, Math.min(L.steps.length, L.i + (L.answered ? 1 : 0)));
+    L.learn.forEach((id) => { if (!T[id]) { T[id] = { box: 1, due: addDays(t, 1), added: t, ok: 0, bad: 0 }; res.nowe.push(id); } });
+    L.known.forEach((id) => { if (!T[id]) { T[id] = { box: 4, due: addDays(t, INTERVAL[4]), added: t, ok: 0, bad: 0, known: true }; res.znane.push(id); } });
+    doneSteps.filter((s) => s.type === "tflip" && !s.retry).forEach((s) => {
+      const w = T[s.wordId]; if (!w) return;
+      if (L.miss.has(s.wordId)) { w.box = 1; w.due = addDays(t, 1); res.spadki.push(s.wordId); }
+      else { w.box = Math.min(6, w.box + 1); w.due = w.box >= 6 ? null : addDays(t, INTERVAL[w.box]); res.awanse.push([s.wordId, w.box]); }
+    });
+    Object.keys(L.wstat).forEach((id) => { const w = T[id]; if (w) { w.ok += L.wstat[id][0]; w.bad += L.wstat[id][1]; } });
+    S.top.newDay[t] = (S.top.newDay[t] || 0) + res.nowe.length;
+    const any = L.total > 0 || res.nowe.length > 0 || res.znane.length > 0;
+    const xp = any ? L.right * 2 + 10 : 0;
+    if (any) { S.xp += xp; S.xpDay[t] = (S.xpDay[t] || 0) + xp; touchDay(); }
+    save();
+    return { xp, res, any };
+  }
+  function showTopResult({ xp, res }) {
+    const nm = (id) => `<b lang="en">${esc(TW[id].en)}</b>`;
+    const lst = (title, arr, fmt) => (arr.length ? `<div class="res-list"><h3>${title}</h3><p>${arr.map(fmt).join(", ")}</p></div>` : "");
+    const known = Object.keys(S.top.words).filter((id) => TW[id]).length;
+    $("#barfill").style.width = "100%";
+    $("#lcount").textContent = "";
+    body.innerHTML = `<div class="result">
+      <div class="stamp" aria-hidden="true">${known}/1000</div>
+      <h1>${res.nowe.length ? `+${res.nowe.length} ${plural(res.nowe.length, "nowe słowo", "nowe słowa", "nowych słów")}` : "Powtórka zrobiona"}</h1>
+      <div class="res-stats"><div><b>${L.right}/${L.total}</b><span>poprawnie</span></div><div><b>+${xp}</b><span>XP</span></div><div><b>${S.streak}</b><span>${plural(S.streak, "dzień", "dni", "dni")} z rzędu</span></div></div>
+      ${lst("Nowe fiszki (pudełko 1)", res.nowe, (id) => `${nm(id)} = ${esc(TW[id].pl)}`)}
+      ${lst(`Już znane (wrócą za ${INTERVAL[4]} dni)`, res.znane, nm)}
+      ${lst("Awanse", res.awanse, ([id, b]) => `${nm(id)} -> ${b >= 6 ? "opanowane" : "pudełko " + b}`)}
+      ${lst("Do pudełka 1", res.spadki, (id) => `${nm(id)} = ${esc(TW[id].pl)}`)}
+    </div>`;
+    foot.className = "l-foot";
+    foot.innerHTML = `<span></span><button class="btn primary" id="fin">Gotowe</button>`;
+    sfx("done");
+    $("#fin").onclick = () => { L = null; UI.view = "top"; render(); window.scrollTo(0, 0); };
+  }
+
   // ---------- silnik lekcji ----------
   const GOOD = ["Dobrze!", "Świetnie!", "Tak jest!", "Brawo!", "Zgadza się!", "Dokładnie!"];
   const cur = () => L.steps[L.i];
@@ -612,7 +845,17 @@
     window.scrollTo(0, 0);
     app.innerHTML = `<div class="lesson"><header class="l-top"><button class="icon-btn" id="quit" aria-label="Przerwij lekcję">${ICON.x}</button><div class="bar" role="progressbar" aria-label="Postęp lekcji"><i id="barfill"></i></div><span class="l-count" id="lcount"></span></header><main class="l-body" id="lbody"></main><footer class="l-foot" id="lfoot"></footer></div>`;
     foot = $("#lfoot"); body = $("#lbody");
-    $("#quit").onclick = () => { if (confirm("Przerwać? Wynik tej sesji nie zostanie zapisany.")) { L = null; if (TTS.ok) speechSynthesis.cancel(); render(); } };
+    $("#quit").onclick = () => {
+      if (L && L.finished) { L = null; return render(); }
+      if (L && L.kind === "top") {
+        if (!confirm("Zakończyć teraz? To, co już zrobione, zostanie zapisane.")) return;
+        if (TTS.ok) speechSynthesis.cancel();
+        const r = finishTop();
+        if (r.any) return showTopResult(r);
+        L = null; return render();
+      }
+      if (confirm("Przerwać? Wynik tej sesji nie zostanie zapisany.")) { L = null; if (TTS.ok) speechSynthesis.cancel(); render(); }
+    };
   }
   function showStep() {
     const st = cur();
@@ -626,7 +869,7 @@
   function next() {
     if (!L) return;
     L.i++;
-    if (L.i >= L.steps.length) return finish();
+    if (L.i >= L.steps.length) return L.kind === "top" ? showTopResult(finishTop()) : finish();
     showStep();
   }
   function footCheck(dunno) {
@@ -858,12 +1101,90 @@
     };
   };
 
+  // ---------- kroki modułu 1000 słów ----------
+  R.tintro = (st) => `<p class="tag new">Nowe słowo · ${Math.min(L.learn.length + 1, L.quota)}/${L.quota}</p>${tcardHTML(TW[st.wordId], { noFoot: true })}`;
+  M.tintro = (st) => {
+    foot.className = "l-foot";
+    foot.innerHTML = `<button class="btn" id="tknow">Już znam</button><button class="btn primary" id="tlearn">Uczę się</button>`;
+    setTimeout(() => say(TW[st.wordId].en), 200);
+    const go = (known) => {
+      if (L.answered) return;
+      L.answered = true;
+      (known ? L.known : L.learn).push(st.wordId);
+      if (!known) L.chunk.push(st.wordId);
+      L.shown++;
+      const more = L.learn.length < L.quota && L.shown < L.quota * 4 ? tPickNext() : null;
+      const ins = [];
+      if (L.chunk.length && (L.chunk.length >= 5 || !more)) { ins.push(...shuffle(L.chunk).map((id) => ({ type: "tq", wordId: id, kind: "en_pl", scored: true }))); L.chunk = []; }
+      if (more) ins.push({ type: "tintro", wordId: more.id });
+      else if (L.learn.length) ins.push(...shuffle(L.learn).map((id) => ({ type: "tq", wordId: id, kind: "pl_en", scored: true })));
+      L.steps.splice(L.i + 1, 0, ...ins);
+      next();
+    };
+    $("#tknow").onclick = () => go(true);
+    $("#tlearn").onclick = () => go(false);
+  };
+
+  R.tq = (st) => {
+    const w = TW[st.wordId];
+    st.opts = st.opts && !st.retry ? st.opts : tOpts(w, st.kind === "pl_en" ? "en" : "pl");
+    const tag = `<p class="tag">${st.retry ? "Jeszcze raz" : "Sprawdzenie"}</p>`;
+    if (st.kind === "en_pl") return `${tag}<h2 class="q">Co znaczy to słowo?</h2><div class="prompt"><button class="aud big" data-say="${esc(w.en)}" aria-label="Posłuchaj">${ICON.spk}</button><span class="pw" lang="en">${esc(w.en)}</span></div>${optsHTML(st.opts.map((x) => x.pl))}`;
+    return `${tag}<h2 class="q">Jak to powiedzieć po angielsku?</h2><div class="prompt"><span class="pw">${esc(w.pl)}</span></div>${optsHTML(st.opts.map((x) => x.en))}`;
+  };
+  M.tq = (st) => {
+    const w = TW[st.wordId];
+    footCheck(true);
+    const correct = st.opts.findIndex((x) => x.id === w.id);
+    let chosen = -1;
+    const fb = `<p class="fb-word"><b lang="en">${esc(w.en)}</b> [${esc(w.say)}] - ${esc(w.pl)}</p><p class="fb-ex">${esc(w.ex[0].en)}<small>${esc(w.ex[0].pl)}</small></p>`;
+    if (st.kind === "en_pl") setTimeout(() => say(w.en), 250);
+    $("#dunno").onclick = () => { markOpts(-1, correct); answer(false, fb, { speak: w.en }); };
+    bindOpts((i) => { chosen = i; enableCheck(true); if (st.kind === "pl_en") say(st.opts[i].en); });
+    $("#check").onclick = () => { markOpts(chosen, correct); answer(chosen === correct, fb, { speak: st.kind === "pl_en" ? null : w.en }); };
+  };
+
+  R.tflip = (st) => {
+    const w = TW[st.wordId];
+    return `<p class="tag">${st.retry ? "Jeszcze raz" : "Powtórka"}</p><div class="flipcard" id="fc"><div class="flip-front" style="--wk:${tcolor(w.n)}"><span class="trank big"><small>nr</small>${w.n}</span><h2 lang="en">${esc(w.en)}</h2>${audioBtns(w.en, true)}<p class="hint">Co to znaczy? Pomyśl, potem odwróć.</p></div></div>`;
+  };
+  M.tflip = (st) => {
+    const w = TW[st.wordId];
+    setTimeout(() => say(w.en), 200);
+    foot.className = "l-foot";
+    foot.innerHTML = `<span class="foot-hint">Pomyśl o znaczeniu.</span><button class="btn primary" id="fturn">Odwróć</button>`;
+    const fc = $("#fc");
+    const grade = (ok) => {
+      if (L.answered) return;
+      L.answered = true;
+      if (!st.retry) { L.total++; if (ok) L.right++; }
+      mark(st.wordId, ok);
+      if (!ok && !st.retry) L.steps.push(Object.assign({}, st, { retry: true }));
+      sfx(ok ? "ok" : "bad");
+      next();
+    };
+    const turn = () => {
+      if (fc.classList.contains("turned") || fc.classList.contains("turning")) return;
+      fc.classList.add("turning");
+      setTimeout(() => {
+        fc.classList.remove("turning"); fc.classList.add("turned");
+        fc.innerHTML = tcardHTML(w, { noFoot: true });
+        foot.innerHTML = `<button class="btn bad" id="fno">Nie umiem</button><button class="btn good" id="fyes">Umiem</button>`;
+        $("#fno").onclick = () => grade(false);
+        $("#fyes").onclick = () => grade(true);
+      }, 160);
+    };
+    $("#fturn").onclick = turn;
+    fc.onclick = (e) => { if (!e.target.closest("button")) turn(); };
+  };
+
   document.addEventListener("keydown", (e) => {
     if (!L || !foot) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (e.key === "Enter" && tag !== "textarea" && tag !== "button") {
       const n = $("#next"); if (n) { e.preventDefault(); return n.click(); }
       const c = $("#check"); if (c && !c.disabled) { e.preventDefault(); return c.click(); }
+      const t = $("#fturn") || $("#tlearn"); if (t) { e.preventDefault(); return t.click(); }
     }
     if (tag === "input" || tag === "textarea") return;
     if (/^[1-6]$/.test(e.key)) { const o = $$("#lbody .opt")[+e.key - 1]; if (o && !o.disabled) o.click(); }
@@ -871,6 +1192,7 @@
 
   // ---------- koniec sesji ----------
   function finish() {
+    L.finished = true;
     const t = today();
     const res = { nowe: [], awanse: [], spadki: [] };
     const graded = L.mode !== "practice";
@@ -1003,6 +1325,6 @@
     app.innerHTML = `<div class="page"><p class="empty">Nie udało się wczytać treści kursu (folder data/).</p></div>`;
     return;
   }
-  if (/[?&]debug\b/.test(location.search)) window.__K = { get L() { return L; }, get S() { return S; }, WORD, compare, norm };
+  if (/[?&]debug\b/.test(location.search)) window.__K = { get L() { return L; }, get S() { return S; }, WORD, TW, TOP, tDue, tOpts, thl, compare, norm };
   render();
 })();
